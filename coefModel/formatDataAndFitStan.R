@@ -91,7 +91,13 @@ siteEventID <- dataUse[ , model.matrix ( ~ sampleEvent - 1)]
 nPerSampleEventIDdt <- dataUse[ , 1.0 / .N, by = sampleEvent]
 siteEventID <- siteEventID * nPerSampleEventIDdt[ , V1]
 
+head(dataUse)
+dataUse[ A >0,]
+dataUse[ , Aboth := ifelse(A1 >0 & A3 >0, 1, 0)]
 
+write.csv(file = "dataUse.csv", x = dataUse)
+dataUse[ , summary(WATERBODY)]
+dataUse[ , summary(MONTH)]
 
 summary(W[, "TEMP_F"])
 summary(V[, "DEPTH"])

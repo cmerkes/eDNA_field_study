@@ -132,9 +132,6 @@ generated quantities {
   for(ii in 1:nSiteEvents){
     //Calculate probability of posistive eDNA occurance for a water sample (i.e., does a water sample have eDNA?)
     pPosistive[ii] = pTheta[ii] * (1.0 - (1.0 - pDetectAC1[ii])^(8.0) ) * (1.0 - ( 1.0 - pDetectAC3[ii])^(8.0)) * ZseID[ii];
-    //Calculate probability of posistive eDNA occurance given eDNA found  within a water sample
-    // (i.e., give A = 1, what is the lab's p?)
-    pPosistive2[ii] = (1.0 - (1.0 - pDetectAC1[ii])^(8.0) ) * (1.0 - ( 1.0 - pDetectAC3[ii])^(8.0)) * ZseID[ii];
   }
 
 }
