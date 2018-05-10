@@ -3,15 +3,25 @@
 
 Richard A. Erickson, Christopher M. Merkes, and Erica L. Mize
 
-<!-- This code supports the manuscript "Sampling designs for landscape-level eDNA monitoring programs using three-level occurrence models.  -->
-<!-- Specifically, we used this code to examine different sampling methods for eDNA-based studies as well as the ability of a three-level occupancy model to recover parameters. Our code can be used to conduct power analysis of eDNA-based studies or analyzed eDNA-based models with a three-level occupancy model.  -->
-<!-- (Both of these uses would require some adaption by the user and require the user understand the statistical assumptions of occupancy models, experimental design, the [R](https://www.r-project.org/) and [Stan](http://mc-stan.org/) languages, and eDNA-based studies). -->
 
+This code supports the manuscript "Refinement of eDNA as an early monitoring tool at the landscape-level: Study design considerations".
+The code fit a three-level occupancy model with two detection assays in the program [Stan](mc-stan.org) through [R](https://www.r-project.org/).
+We programmed this code for a specific project with the USFWS and it will likely not generalize to other situations.
+The primary purpose of releasing this code is transparency and scientific reproducible. 
+However, this code could be adapted by people who understand Stan and want to create their own three-level occupancy model.
 
+## Code files
+
+This repository contains the following files and folder:
+- `README.md`: This file
+- `LICENSE`: The standard USGS software license
+- `coefModel`: A folder with script
+  - `formatDataAndFitStan.R`: The R Script that formats data and runs the Stan model
+  - `positiveSampleCoef.stan`: The Stan model that is called by the R script.
+  
 ## Contact for code 
 
 Primary code developer:  Richard A. Erickson (rerickson@usgs.gov)
-
 
 ## Disclaimer
 
