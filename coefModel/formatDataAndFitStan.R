@@ -125,11 +125,16 @@ dataUseStanData <- list(
     pID = dataUse[ ,sampleEventID],
     K = dataUse[ , min(IPC.Cy5.Hits)]
 )
+dataUse[ A >0, .(AC1 = mean(AC1.FAM.Hits), AC3 = mean(AC3.HEX.Hits)), by = .(WATERBODY, MONTH)]
 
-### Fit model
-## stanOut <- stan("posistiveSampleCoef.stan", chains = 4,
-##                iter = 4000, data = dataUseStanData)
+
+
+### Fit model, uncomment as needed
+## stanOut <- stan("positiveSampleCoef.stan", chains = 4,
+##                 iter = 10000, data = dataUseStanData)
 ## save(file = "stanOut.RData", stanOut)
+
+
 load("stanOut.RData")
 summaryOut <- summary(stanOut)$summary
 hist(summaryOut[ , "Rhat"])
