@@ -19,6 +19,7 @@ data {
   int<lower = 0> nSiteEvents; // Number of sites per event
   matrix[ nObs, nSiteEvents] siteEventID;
   vector[nSiteEvents] nPerSampleEvent;
+  int<lower = 0> nSimSamples; // Number of samples to simulate over for P(1) curve
 }
 parameters {
   vector[nPsi] muPpsi;
@@ -110,7 +111,9 @@ generated quantities {
   row_vector[nSiteEvents] muPAC1SiteEvent;
   row_vector[nSiteEvents] muPAC3SiteEvent;
   
-  vector<lower = 0, upper = 1>[nSiteEvents] pPosistive;
+  vector<lower = 0, upper = 1>[nSiteEvents] pPositive;
+
+  matrix[ nSiteEvents, nSimSamples] pDetectOne;
   
   for(sPsi in 1:nPsi){
     pPsi[sPsi]   = inv_logit(muPpsi[sPsi]);
@@ -130,7 +133,10 @@ generated quantities {
 
   for(ii in 1:nSiteEvents){
     //Calculate probability of posistive eDNA occurance for a water sample (i.e., does a water sample have eDNA?)
-    pPosistive[ii] = pTheta[ii]* (1.0 - (1.0 - pDetectAC1[ii])^(8.0) ) * (1.0 - ( 1.0 - pDetectAC3[ii])^(8.0));
+    pPositive[ii] = pTheta[ii]* (1.0 - (1.0 - pDetectAC1[ii])^(8.0) ) * (1.0 - ( 1.0 - pDetectAC3[ii])^(8.0));
+    /* matrix[ nSiteEvents, nSimSamples] pDetectOne; */
+    for(simSample in 1:nSimSamples){
+      pDetectOne[ ii, simSample] = 1.0 - (1.0 - pPositive[ii]) ^ simSample;
+    }
   }
-
 }

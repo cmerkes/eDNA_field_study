@@ -41,7 +41,7 @@ dataUse[ , sampleEventID := as.numeric(sampleEvent)]
 dataUse[ , A1 := ifelse(AC1.FAM.Hits > 0, 1, 0)]
 dataUse[ , A3 := ifelse(AC3.HEX.Hits > 0, 1, 0)]
 
-## Important assumption
+## Important assumption about what sample positive detection
 dataUse[ , A := ifelse(A1 > 0 | A3 > 0, 1, 0)]
 
 ## Look at summary of data and merge in sample level Z
@@ -49,33 +49,30 @@ dataSummary <- dataUse[ , .(Posistive = sum(A)),
                        by = .(  WATERBODY, WATERBODYid,
                               MONTH, MONTHid,
                               sampleEventID)][ order(WATERBODY),]
+## calculate Z 
 dataSummary[ , Z := ifelse(Posistive > 0, 1, 0)]
-print(dataSummary)
 
+## Merge dataUse and dataSummary 
 setkey(dataSummary, "sampleEventID")
 setkey(dataUse, "sampleEventID")
-
 dataUse <- dataUse[dataSummary[ , .(sampleEventID, Z)]]
 
-
+## Create summary table, used for Stan and Plots 
 sampleEventKey <- copy(dataUse[ , .(ID = mean(sampleEventID),
                                hits = sum(AC1.FAM.Hits + AC3.HEX.Hits),
                                nPositive = sum(A),
                                nSites = .N),
                                by = .(sampleEvent, MONTH, WATERBODY)])
                                
-
 sampleEventKey[ , MONTH := factor(MONTH, levels = c('11', '5', '4'), 
                                   labels = c('November', "May", 'April'))]
-
 sampleEventKey[ , WATERBODY := factor(WATERBODY, levels = levels(WATERBODY)[rev(c(2, 4, 1, 3))])]
-
-
 sampleEventKey[ , pPos := nPositive / nSites ]
 sampleEventKey[ , pHits := hits / (nSites * 8)]
 
-colnames(dataUse)
-
+### Look at summary of water depths and temps
+dataUse[ , mean(DEPTH) * 0.3048, by = WATERBODY]
+dataUse[ , .(mean = round(mean(TEMP_F),1), min = min(TEMP_F), max = max(TEMP_F)), by = MONTH]
 
 #######################################################
 ## Coefficients for predictions 
@@ -91,16 +88,9 @@ siteEventID <- dataUse[ , model.matrix ( ~ sampleEvent - 1)]
 nPerSampleEventIDdt <- dataUse[ , 1.0 / .N, by = sampleEvent]
 siteEventID <- siteEventID * nPerSampleEventIDdt[ , V1]
 
-head(dataUse)
-dataUse[ A >0,]
 dataUse[ , Aboth := ifelse(A1 >0 & A3 >0, 1, 0)]
 
 write.csv(file = "dataUse.csv", x = dataUse)
-dataUse[ , summary(WATERBODY)]
-dataUse[ , summary(MONTH)]
-
-summary(W[, "TEMP_F"])
-summary(V[, "DEPTH"])
 
 ## Create list of data for Stan
 dataUseStanData <- list(
@@ -123,35 +113,46 @@ dataUseStanData <- list(
     psiID = dataUse[ ,  WATERBODYid],
     thetaID = dataUse[ , sampleEventID],
     pID = dataUse[ ,sampleEventID],
-    K = dataUse[ , min(IPC.Cy5.Hits)]
+    K = dataUse[ , min(IPC.Cy5.Hits),],
+    nSimSamples = 200
 )
 dataUse[ A >0, .(AC1 = mean(AC1.FAM.Hits), AC3 = mean(AC3.HEX.Hits)), by = .(WATERBODY, MONTH)]
 
-
-
-### Fit model, uncomment as needed
+#########################################################################################
+#########################################################################################
+## Fit model,
+##
+## Uncomment as needed
+## Model takes ~ 45 minutes to run
 ## stanOut <- stan("positiveSampleCoef.stan", chains = 4,
-##                 iter = 10000, data = dataUseStanData)
+##                 iter = 10000, data = dataUseStanData) ## use 10,000 for actual run 2588s, 100 takes ~210s 
 ## save(file = "stanOut.RData", stanOut)
 
-
+## load saved data
 load("stanOut.RData")
-summaryOut <- summary(stanOut)$summary
-hist(summaryOut[ , "Rhat"])
 
-## print(stanOut, c("alpha", "pPsi", "deltaAC1", "deltaAC3", "lp__"))
+#########################################################################################
+#########################################################################################
+## Examine model summary output
+summaryOut <- summary(stanOut)$summary
+summaryOut
+
+hist(summaryOut[ , "Rhat"])
+## ID which parameters did not converge
+summaryOut[ summaryOut[, "Rhat"] > 1.01, ] 
+
 print(stanOut, c("pPsi", "pTheta", "pDetectAC1", "pDetectAC3", "lp__"))
 
-traceplot(stanOut, c("alpha"), inc_warmup = FALSE)
-traceplot(stanOut, c("alpha[13]", "alpha[14]"), inc_warmup = FALSE)
+## ## Examine traceplots
+## traceplot(stanOut, c("alpha"), inc_warmup = FALSE)
+## traceplot(stanOut, c("alpha[13]", "alpha[14]"), inc_warmup = FALSE)
 
-traceplot(stanOut, c("deltaAC1"))
-traceplot(stanOut, c("deltaAC3"))
-traceplot(stanOut, "pPsi")
+## traceplot(stanOut, c("deltaAC1"))
+## traceplot(stanOut, c("deltaAC3"))
+## traceplot(stanOut, "pPsi")
 
-traceplot(stanOut, c("deltaAC1[13]", "deltaAC1[14]"), inc_warmup = FALSE)
-quartz()
-traceplot(stanOut, c("deltaAC3[13]", "deltaAC3[14]"), inc_warmup = FALSE)
+## traceplot(stanOut, c("deltaAC1[13]", "deltaAC1[14]"), inc_warmup = FALSE)
+## traceplot(stanOut, c("deltaAC3[13]", "deltaAC3[14]"), inc_warmup = FALSE)
 
 ## Lookat raw data
 ## For Z
@@ -159,11 +160,15 @@ dataUse[ , .(Z = mean(Z)), by = .(MONTH, WATERBODY)]
 dataUse[ ,  .N, by = .(Z >0)]
 dataUse[ , .(Z = mean(Z)), by = .(MONTH, WATERBODY)]
 
-dataUse[ WATERBODY == "Iowa River" & MONTH == '5' & A > 0,]
-dataUse[ , .(A = sum(A)), by = .(MONTH, WATERBODY)]
+dataUse[ , .(either = round(mean(A), 2), both = round(mean(Aboth), 2)),
+        by = .(MONTH, WATERBODY)]
+dataUse[ , .(either = sum(A), both = sum(Aboth), A1 = sum(A1), A3 = sum(A3)),
+        by = .(MONTH, WATERBODY)]
 
-colnames(dataUse)
+dataUse[ , .(either = round(mean(A), 2), both = round(mean(Aboth), 2)),
+        by = .(WATERBODY)]
 
+## Create tables for GIS layers
 either <- dataUse[ , .(AC1 = sum(AC1.FAM.Hits),
                        AC3 = sum(AC3.HEX.Hits)), by = .(WATERBODY, MONTH)]
 either
@@ -172,70 +177,19 @@ both <- dataUse[ AC1.FAM.Hits >0 & AC3.HEX.Hits, .N, by = .(WATERBODY, MONTH)]
 both
 write.csv(file = "posistive_table.csv", x = both, row.names  = FALSE)
 
-## For A
-dataUse[Z > 0 , .(A = mean(A)), by = .(MONTH, WATERBODY)]
 
-## For Y
-OrCompare <- dataUse[A1 > 0 | A3 >0 ,
-        .(pAC1 = mean(AC1.FAM.Hits/8),
-          pAC3 = mean(AC3.HEX.Hits/8)),
-        by = .(MONTH, WATERBODY)]
-OrCompare
-
-mean(OrCompare[ , dbinom( 0, 8, pAC1)])
-mean(OrCompare[ , dbinom( 0, 8, pAC3)])
-
-
-AndCompare <- dataUse[A1 > 0 & A3 >0 ,
-        .(pAC1 = mean(AC1.FAM.Hits/8),
-          pAC3 = mean(AC3.HEX.Hits/8)),
-        by = .(MONTH, WATERBODY)]
-AndCompare
-
-A1Only <- dataUse[A1 > 0,
-        .(pAC1 = mean(AC1.FAM.Hits/8)),
-        by = .(MONTH, WATERBODY)]
-
-
-dataUse[ A1 != A3, .N, by = .(A1 >0, MONTH, WATERBODY)]
-dataUse[ , .N, by = .(A1 >0, MONTH, WATERBODY)]
-
-
-A1Only
-A1Only[ , dbinom( 0, 8, pAC1)]
-
-A3Only <- dataUse[A3 > 0 ,
-        .(pAC3 = mean(AC3.HEX.Hits/8)),
-        by = .(MONTH, WATERBODY)]
-
-A3Only[ , dbinom( 0, 8, pAC3)]
-
-
-ggplot(dataUse[Z > 0 & A1 > 0,], aes(x = AC1.FAM.Hits)) + geom_histogram() + facet_grid(MONTH ~ WATERBODY)
-## Extract and plot nice
-
-
-extractEst <- function(dataIn = stanOut,
-                       parameter = "pPsi",
-                       rowNames = NULL
-                       ){
-    dataOut <-  data.table(t(apply(extract(dataIn, pars = c(parameter))[[1]],
-                                    2, quantile, c(0.975, 0.9, 0.5, 0.1, 0.025))))
-    
-    setnames( dataOut, c("u95", "u80", "median", "l80", "l95"))
-    if(is.null(rowNames)){
-        dataOut[ , ID := 1:.N]
-    } else {
-        dataOut[ , ID := rowNames]
-    }
-    return(dataOut)
-}
+## Extract and plot coefficients
 
 ## Extract out Psis to plot
-pPsiPlot <- extractEst(dataIn = stanOut,
-                       parameter = "pPsi")
+pPsiPlot <- data.frame(summary(stanOut,
+                   par = "pPsi",
+                   probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(pPsiPlot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
 
-pPsiPlot
+pPsiPlot$parameter <- rownames(pPsiPlot)
+pPsiPlot <- data.table(pPsiPlot)
+pPsiPlot[ , ID := as.numeric(gsub("pPsi\\[(\\d{1,2})\\]", "\\1", parameter))]
+
 siteKey <- dataUse[ , .(ID = mean(WATERBODYid)), by = WATERBODY]
 setkey(siteKey, "ID")
 setkey(pPsiPlot, "ID")
@@ -244,6 +198,8 @@ pPsiPlot <- siteKey[ pPsiPlot]
 
 pPsiPlot[ , WATERBODY := factor(WATERBODY, levels = levels(WATERBODY)[rev(c(2, 4, 1, 3))])]
 
+levels(pPsiPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
+
 pPsiPlotFig <- ggplot(data = pPsiPlot, aes(x = WATERBODY, y = median)) +
     geom_linerange(aes(ymin = l95, ymax = u95)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4) + 
@@ -251,25 +207,31 @@ pPsiPlotFig <- ggplot(data = pPsiPlot, aes(x = WATERBODY, y = median)) +
     coord_flip() +
     ylim(c(0, 1))+
     ylab(expression("Estimated "*psi)) +
-    xlab("Site") +
+    xlab("Study site") +
     theme_minimal()
 
 pPsiPlotFig 
-ggsave(paste0("pPsiPlot.pdf"), pPsiPlotFig, width = 6, height = 4)
-ggsave(paste0("pPsiPlot.jpg"), pPsiPlotFig, width = 6, height = 4)
+ggsave(paste0("pPsiPlot.pdf"), pPsiPlotFig, width = 7, height = 4)
+ggsave(paste0("pPsiPlot.jpg"), pPsiPlotFig, width = 7, height = 4)
 
 ## Extract out thetas to plot
-pThetaPlot <- extractEst(dataIn = stanOut,
-                       parameter = "pTheta")
-pThetaPlot[ , ID := 1:.N]
-dataUse
+pThetaPlot <- data.frame(summary(stanOut,
+                   par = "pTheta",
+                   probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(pThetaPlot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+
+pThetaPlot$parameter <- rownames(pThetaPlot)
+pThetaPlot <- data.table(pThetaPlot)
+pThetaPlot[ , ID := as.numeric(gsub("pTheta\\[(\\d{1,2})\\]", "\\1", parameter))]
+
 eventKey <- dataUse[ , .(ID = mean(sampleEventID)), by = .(WATERBODY, MONTH) ]
-eventKey
 
 setkey(sampleEventKey, "ID")
 setkey(pThetaPlot, "ID")
 
 pThetaPlot <- sampleEventKey[ pThetaPlot]
+
+levels(pThetaPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
 
 pThetaPlotFig <- ggplot(data = pThetaPlot, aes(x = WATERBODY, y = median,
                                                color = MONTH,
@@ -283,7 +245,8 @@ pThetaPlotFig <- ggplot(data = pThetaPlot, aes(x = WATERBODY, y = median,
     geom_point(aes(size = pPos), position = position_dodge(width = 0.5)) + 
     coord_flip() +
     ylab(expression("Estimated "*theta)) +
-    xlab("Site") +
+    xlab("Study site") +
+    ylim(c(0, 1)) + 
     theme_bw() +
     scale_color_manual("Month", values = c("blue", "red", "black"),
 				       breaks = c("April", "May", "November")) +
@@ -295,18 +258,29 @@ pThetaPlotFig <- ggplot(data = pThetaPlot, aes(x = WATERBODY, y = median,
 		)
 
 pThetaPlotFig
-ggsave(paste0( "pThetaPlot.pdf"), pThetaPlotFig, width = 6, height = 5)
-ggsave(paste0( "pThetaPlot.jpg"), pThetaPlotFig, width = 6, height = 5)
-
+ggsave(paste0( "pThetaPlot.pdf"), pThetaPlotFig, width = 7, height = 5)
+ggsave(paste0( "pThetaPlot.jpg"), pThetaPlotFig, width = 7, height = 5)
 
 ## Extract out detectionProbs to plot
-pAC1Plot <- extractEst(dataIn = stanOut,
-                       parameter = "pDetectAC1")
-pAC3Plot <- extractEst(dataIn = stanOut,
-                       parameter = "pDetectAC3")
+pAC1Plot <- data.frame(summary(stanOut,
+                   par = "pDetectAC1",
+                   probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(pAC1Plot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
 
-pAC1Plot[ , ID := 1:.N]
-pAC3Plot[ , ID := 1:.N]
+pAC1Plot$parameter <- rownames(pAC1Plot)
+pAC1Plot <- data.table(pAC1Plot)
+pAC1Plot[ , ID := as.numeric(gsub("pDetectAC1\\[(\\d{1,2})\\]", "\\1", parameter))]
+
+
+pAC3Plot <- data.frame(summary(stanOut,
+                   par = "pDetectAC3",
+                   probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(pAC3Plot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+
+pAC3Plot$parameter <- rownames(pAC3Plot)
+pAC3Plot <- data.table(pAC3Plot)
+pAC3Plot[ , ID := as.numeric(gsub("pDetectAC3\\[(\\d{1,2})\\]", "\\1", parameter))]
+
 
 setkey(sampleEventKey, "ID")
 setkey(pAC1Plot, "ID")
@@ -314,22 +288,26 @@ setkey(pAC3Plot, "ID")
 
 
 pAC1Plot <- sampleEventKey[ pAC1Plot]
-pAC1Plot[ , marker := "AC1"]
+pAC1Plot[ , marker := "ACTM1"]
 
 pAC3Plot <- sampleEventKey[ pAC3Plot]
-pAC3Plot[ , marker := "AC3"]
+pAC3Plot[ , marker := "ACTM3"]
 
 pACPlot <- rbind(pAC3Plot, pAC1Plot)
 pACPlot <- pACPlot
 pACPlot
+colnames(pACPlot)
+pACPlot[ , .(sampleEvent, marker, l95, median, u95)]
+pACPlot[ , marker := factor(marker, levels = c("ACTM3", "ACTM1"))]
 
-pACPlot[ , marker := factor(marker, levels = c("AC3", "AC1"))]
+levels(pACPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
+
 
 pACPlotFig <- ggplot(data = pACPlot, aes(x = WATERBODY, y = median,
                                          color = MONTH,
                                          shape = marker,
                                          alpha = pHits)) +
-    scale_shape("Marker", breaks = c("AC1", "AC3")) +
+    scale_shape("Marker", breaks = c("ACTM1", "ACTM3")) +
     scale_alpha(expression("Proportion K"), breaks = c( 0, 0.075,0.15))+
     scale_size(expression("Proportion J"), breaks = c(0, 0.15, 0.3)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
@@ -339,7 +317,8 @@ pACPlotFig <- ggplot(data = pACPlot, aes(x = WATERBODY, y = median,
     geom_point(aes(size = pPos), position = position_dodge(width = 1)) + 
     coord_flip() +
     ylab(expression("Estimated "*italic(p))) +
-    xlab("Site") +
+    ylim(c(0, 1)) + 
+    xlab("Study site") +
     theme_bw() +
     scale_color_manual("Month", values = c("blue", "red", "black"),
                        breaks = c("April", "May", "November"))+
@@ -353,8 +332,8 @@ pACPlotFig <- ggplot(data = pACPlot, aes(x = WATERBODY, y = median,
 
 
 pACPlotFig
-ggsave(paste0( "pACPlot.pdf"), pACPlotFig, width = 6, height = 7)
-ggsave(paste0( "pACPlot.jpg"), pACPlotFig, width = 6, height = 7)
+ggsave(paste0( "pACPlot.pdf"), pACPlotFig, width = 7, height = 7)
+ggsave(paste0( "pACPlot.jpg"), pACPlotFig, width = 7, height = 7)
 
 
 dataUse[Z >0 & A > 0,
@@ -362,7 +341,6 @@ dataUse[Z >0 & A > 0,
           pAC3 = mean(AC3.HEX.Hits/8)),
         by = .(MONTH, WATERBODY)]
 
-head(dataUse)
 dataUse[ ,
         .(pAC1 = sum(AC1.FAM.Hits),
           pAC3 = sum(AC3.HEX.Hits)),
@@ -378,18 +356,29 @@ dataUse[ WATERBODY == "Boston Bay"  & MONTH == 11,]
 
         
 ## Extract out pPosistive
-pPosistivePlot <- extractEst(dataIn = stanOut,
-                          parameter = "pPosistive")
-pPosistivePlot[ , ID := 1:.N]
+pPositivePlot <-  data.frame(summary(stanOut,
+                                     par = "pPositive",
+                                     probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+
+colnames(pPositivePlot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+
+head(pPositivePlot)
+pPositivePlot$rawStanID <- rownames(pPositivePlot)
+
+pPositivePlot <- data.table(pPositivePlot)
+pPositivePlot
+pPositivePlot[ , ID := as.numeric(gsub("(pPositive)\\[(\\d{1,2})\\]", "\\2", rawStanID))]
 
 setkey( sampleEventKey, "ID")
-setkey(pPosistivePlot, "ID")
+setkey(pPositivePlot, "ID")
 
-pPosistivePlot <- sampleEventKey[ pPosistivePlot]
-head(pPosistivePlot)
-tail(pPosistivePlot)
+pPositivePlot<- sampleEventKey[ pPositivePlot]
+head(pPositivePlot)
 
-pPosistivePlotFig <- ggplot(data = pPosistivePlot, aes(x = WATERBODY, y = median,
+tail(pPositivePlot)
+levels(pPositivePlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
+
+pPositivePlotFig <- ggplot(data = pPositivePlot, aes(x = WATERBODY, y = median,
                                                  color = MONTH,
                                                  alpha = pHits)) +
     scale_alpha(expression("Proportion K"))+
@@ -402,9 +391,9 @@ pPosistivePlotFig <- ggplot(data = pPosistivePlot, aes(x = WATERBODY, y = median
         size =  pPos), 
                position = position_dodge(width = 0.5)) + 
     coord_flip() +
-    ## ylim(c(0, 1))+
-    ylab(expression("Probability of positive detection in one sample")) +
-    xlab("Site") +
+    ylim(c(0, 1))+
+    ylab(expression("Probability of positive detection in \u2265 1 sample")) +
+    xlab("Study site") +
     scale_color_manual("Month", values = c("blue", "red", "black"),
 				       breaks = c("April", "May", "November"))+
     facet_grid( WATERBODY ~., scales = 'free') +
@@ -415,16 +404,24 @@ pPosistivePlotFig <- ggplot(data = pPosistivePlot, aes(x = WATERBODY, y = median
 		strip.text.y = element_blank()
 		)
 
-## x11()
-pPosistivePlotFig
-ggsave(paste0( "pPosistivePlot.pdf"), pPosistivePlotFig, width = 8, height = 6)
-ggsave(paste0( "pPosistivePlot.jpg"), pPosistivePlotFig, width = 8, height = 6)
+pPositivePlotFig
+ggsave(paste0( "pPositivePlot.pdf"), pPositivePlotFig, width = 8, height = 6)
+ggsave(paste0( "pPositivePlot.jpg"), pPositivePlotFig, width = 8, height = 6)
 
 ##########################################################################
 ## Extract and plot regression coefficients 
 alphaNames <- gsub("sampleEvent", "", colnames(W))
-alphaPlot  <- extractEst(dataIn = stanOut, parameter = "alpha", rowNames = alphaNames)
-alphaPlot
+
+alphaPlot <- data.frame(summary(stanOut,
+                                par = "alpha",
+                                probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(alphaPlot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+
+alphaPlot$parameter <- rownames(alphaPlot)
+alphaPlot <- data.table(alphaPlot)
+alphaPlot[ , ID := alphaNames]
+
+
 ggplot(alphaPlot, aes(x = ID, y = median)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.5)) + 
@@ -433,9 +430,16 @@ ggplot(alphaPlot, aes(x = ID, y = median)) +
     geom_point() + 
     coord_flip() 
 
-deltaAC1Names <- gsub("sampleEvent", "", colnames(V))
-deltaAC1Plot  <- extractEst(dataIn = stanOut, parameter = "deltaAC1", rowNames = deltaAC1Names)
-print(deltaAC1Plot)
+deltaAC1Names <- gsub("sampleEvent", "", colnames(W))
+
+deltaAC1Plot <- data.frame(summary(stanOut,
+                                par = "deltaAC1",
+                                probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(deltaAC1Plot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+
+deltaAC1Plot$parameter <- rownames(deltaAC1Plot)
+deltaAC1Plot <- data.table(deltaAC1Plot)
+deltaAC1Plot[ , ID := deltaAC1Names]
 
 ggplot(deltaAC1Plot, aes(x = ID, y = median)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
@@ -446,9 +450,18 @@ ggplot(deltaAC1Plot, aes(x = ID, y = median)) +
     coord_flip() 
 
 
-deltaAC3Names <- gsub("sampleEvent", "", colnames(V))
-deltaAC3Plot  <- extractEst(dataIn = stanOut, parameter = "deltaAC3", rowNames = deltaAC3Names)
-print(deltaAC3Plot)
+
+deltaAC3Names <- gsub("sampleEvent", "", colnames(W))
+
+deltaAC3Plot <- data.frame(summary(stanOut,
+                                par = "deltaAC3",
+                                probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
+colnames(deltaAC3Plot)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+
+deltaAC3Plot$parameter <- rownames(deltaAC3Plot)
+deltaAC3Plot <- data.table(deltaAC3Plot)
+deltaAC3Plot[ , ID := deltaAC3Names]
+
 
 ggplot(deltaAC3Plot, aes(x = ID, y = median)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
@@ -467,6 +480,10 @@ allPlot <- rbind(alphaPlot, deltaAC1Plot, deltaAC3Plot)
 coefPlot <- allPlot[ grep("DEPTH|TEMP", ID),]
 
 coefPlot[ , ID := factor(ID, labels = c("Depth", "Temperature"))]
+coefPlot[  , .(l95 = exp(l95), median = exp(median), u95 = exp(u95)), by = .(ID, level)]
+
+coefPlot[ , level := factor(level)]
+levels(coefPlot$level) <- c("ACTM1", "ACTM3", "Collection sample")
 
 coefGG <- ggplot( coefPlot, aes(x = ID, y = median)) +
     geom_hline(yintercept = 0, color = 'red', size = 1.5) + 
@@ -478,57 +495,55 @@ coefGG <- ggplot( coefPlot, aes(x = ID, y = median)) +
     facet_grid(  level ~ . ) + 
     coord_flip() +
     ylab("Estimated distribution on raw logit scale") +
-    xlab("Model covariate coefficients") + theme_minimal()
+    xlab("Model variable coefficients") +
+    theme_minimal()
+
 print(coefGG)
 
 ggsave("coefGG.pdf", coefGG, width = 6, height = 4)
 ggsave("coefGG.jpg", coefGG, width = 6, height = 4)
 
-depthGG <- ggplot(dataUse, aes(x = DEPTH, y = AC1.FAM.Hits + AC3.HEX.Hits)) + geom_point() +
-    stat_smooth()+ facet_grid( ~ WATERBODY)
-depthGG
-ggsave("depthGG.pdf", depthGG, width = 6, height = 4)
+## Probability of detection
 
-dataUse[ , summary(TEMP_F)]
-tempMargin <- seq(39, 64, by = 1)
+rownames(summaryOut)
 
-alphaMarginPlot <- copy(alphaPlot)
-alphaMarginPlot[ , tempSlope := alphaMarginPlot[ ID == "TEMP_F", median]]
-alphaMarginPlot <- copy(alphaMarginPlot[ ID != 'TEMP_F' & ID != 'DEPTH',
-                                        .(median, ID, tempSlope)])
+pPos <- data.frame(summary(stanOut, par = "pDetectOne", probs = c(0.025, 0.1, 0.5, 0.9, 0.975))$summary)
 
+colnames(pPos)[4:8] <- c("l95", "l80", "median", "u80", "u95")
+head(pPos)
+pPos$stanName <- rownames(pPos)
+pPos <- data.table(pPos)
+pPos
 
-alphaTempValues = data.table(expand.grid(ID = alphaMarginPlot[ , ID], temp = tempMargin))
+pPos[ , site := as.numeric(gsub("(pDetectOne\\[)(\\d{1,2}),(\\d{1,3})\\]", "\\2", stanName))]
+pPos[ , nSamples := as.numeric(gsub("(pDetectOne\\[)(\\d{1,2}),(\\d{1,3})\\]", "\\3", stanName))]
+pPos
 
-setkey(alphaTempValues, "ID")
-setkey(alphaMarginPlot, "ID")
-alphaGGplot <- alphaTempValues[ alphaMarginPlot]
-invLogit <- function(x){ return(exp(x) / (1 + exp(x)))}
+sampleEventKey
+setkey( sampleEventKey, "ID")
+setkey( pPos, "site")
 
-alphaGGplot[ , predicted := invLogit( median + temp * tempSlope)]
+pPosPlot <- sampleEventKey[ pPos]
+pPosPlot
+levels(pPosPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater",
+                                      "Iowa River tributary", "Dam 17 spillway")
 
-dataSummary[ , ID := paste( WATERBODY, MONTH, sep = "-")] 
-
-setkey(dataSummary, "ID")
-setkey(alphaGGplot, 'ID')
-alphaGGplot <- dataSummary[ alphaGGplot]
-
-tempMarginPlot <- ggplot(alphaGGplot, aes(x = temp, y = predicted, color = MONTH)) +
-    geom_jitter(data = dataUse, aes(x = TEMP_F, y = A, color = MONTH),
-                width = 0, height = 0.1)  + 
+pPosPlot[ , MONTH := factor(MONTH)]
+pPosPlot[ , MONTH := factor(MONTH, levels = c("April", "May", "November"))]
+pPosPlot
+library(scales)
+pPosPlot
+detectOne <- ggplot(pPosPlot[ nPositive > 0, ], aes(x = nSamples, y = median, color = MONTH, fill = MONTH)) +
+    facet_grid(WATERBODY ~ MONTH)  + theme_minimal() +
+    scale_color_manual("Month", values = c("black", "red", "blue")) + 
+    scale_fill_manual("Month", values = c("black", "red", "blue")) + 
+    geom_ribbon(aes(ymin = l95, ymax = u95), alpha = 0.25, color = NA) +
+    geom_ribbon(aes(ymin = l80, ymax = u80), alpha = 0.25, color = NA) +
     geom_line() +
-    facet_grid( ~ WATERBODY) + ylab(expression("estiamted "*theta)) +
-    xlab(expression("Temperature ("*degree*"F)")) + theme_minimal() +
-    scale_color_manual("Month", values = c("red", "blue", "black"))
+    xlab("Number of samples per site collected") +
+    ylab( "Probability of detecting \u22651 positive sample per site")
+print(detectOne)
 
-print(tempMarginPlot)
-ggsave("TemperatureMarginPlot.pdf", tempMarginPlot, width = 6, height = 4)
+ggsave("detectOne.jpg", detectOne, width = 6, height = 6)
+ggsave("detectOne.pdf", detectOne, width = 6, height = 6)
 
-
-ggplot(data = dataUse, aes(x = TEMP_F, y = A, color = MONTH))  +
-    geom_jitter(width = 0, height = 0.1) + 
-    facet_grid( WATERBODY ~ MONTH, scales = "free_x") +
-    ylab(expression("estiamted "*theta)) +
-    xlab(expression("Temperature ("*degree*"F)")) + theme_bw() +
-    scale_color_manual("Month", values = c("red", "blue", "black")) + 
-    stat_smooth(method = 'glm', method.args = list(family = "binomial"))
