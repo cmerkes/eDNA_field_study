@@ -9,25 +9,8 @@ options(width = 100)
 #########################################################################################
 ## Data wrangling section
 ## Load in data summary and merge
-d1 <- fread("../30000_Data_Summary1_shared.csv")
-d2 <- fread("../30001_Data_Summary1_shared.csv")
-d3 <- fread("../30005_Data_Summary1_shared.csv")
-dAll <- rbind(d1, d2, d3)
 
-## Load in metadata and merge
-m1 <- fread("../Iowa_30000.csv")
-m2 <- fread("../Iowa_30001.csv")
-m3 <- fread("../Iowa_30005.csv")
-mAll <- rbind(m1, m2, m3)
-
-## Merge data summary and metadata
-nrow(mAll) == nrow(dAll)
-setkey(mAll, "RUID")
-setkey(dAll, "UniqueID")
-dataUse <- mAll[ dAll]
-
-## Remove blanks 
-dataUse <- dataUse[ BLANK == "No", ] 
+dataUse <- fread("dataShare.csv")
 
 ## Create ID Columns 
 dataUse[ , WATERBODY := factor(WATERBODY)]
@@ -43,6 +26,11 @@ dataUse[ , A3 := ifelse(AC3.HEX.Hits > 0, 1, 0)]
 
 ## Important assumption about what sample positive detection
 dataUse[ , A := ifelse(A1 > 0 | A3 > 0, 1, 0)]
+
+## Covert to meteric
+colnames(dataUse)
+dataUse[ , TEMP_C := (TEMP_F - 32) * 5 / 9]
+dataUse[ , DEPTH_M := DEPTH * 0.3048]
 
 ## Look at summary of data and merge in sample level Z
 dataSummary <- dataUse[ , .(Posistive = sum(A)),
@@ -71,8 +59,8 @@ sampleEventKey[ , pPos := nPositive / nSites ]
 sampleEventKey[ , pHits := hits / (nSites * 8)]
 
 ### Look at summary of water depths and temps
-dataUse[ , mean(DEPTH) * 0.3048, by = WATERBODY]
-dataUse[ , .(mean = round(mean(TEMP_F),1), min = min(TEMP_F), max = max(TEMP_F)), by = MONTH]
+dataUse[ , mean(DEPTH_M) * 0.3048, by = WATERBODY]
+dataUse[ , .(mean = round(mean(TEMP_C),1), min = min(TEMP_C), max = max(TEMP_C)), by = MONTH]
 
 #######################################################
 ## Coefficients for predictions 
@@ -80,8 +68,8 @@ dataUse[ , .(mean = round(mean(TEMP_F),1), min = min(TEMP_F), max = max(TEMP_F))
 ## X = dataUse[ , model.matrix( ~ WATERBODY - 1 )]
 
 ## Specify equations for model 
-W = dataUse[ , model.matrix ( ~ sampleEvent - 1 + DEPTH + TEMP_F )]
-V = dataUse[ , model.matrix ( ~ sampleEvent - 1 + DEPTH + TEMP_F)]
+W = dataUse[ , model.matrix ( ~ sampleEvent - 1 + DEPTH_M + TEMP_C )]
+V = dataUse[ , model.matrix ( ~ sampleEvent - 1 + DEPTH_M + TEMP_C)]
 
 ## site-event matrix also includes the weighting for numberof samples per site 
 siteEventID <- dataUse[ , model.matrix ( ~ sampleEvent - 1)]
@@ -89,8 +77,6 @@ nPerSampleEventIDdt <- dataUse[ , 1.0 / .N, by = sampleEvent]
 siteEventID <- siteEventID * nPerSampleEventIDdt[ , V1]
 
 dataUse[ , Aboth := ifelse(A1 >0 & A3 >0, 1, 0)]
-
-write.csv(file = "dataUse.csv", x = dataUse)
 
 ## Create list of data for Stan
 dataUseStanData <- list(
@@ -113,7 +99,7 @@ dataUseStanData <- list(
     psiID = dataUse[ ,  WATERBODYid],
     thetaID = dataUse[ , sampleEventID],
     pID = dataUse[ ,sampleEventID],
-    K = dataUse[ , min(IPC.Cy5.Hits),],
+    K = 8,
     nSimSamples = 200
 )
 dataUse[ A >0, .(AC1 = mean(AC1.FAM.Hits), AC3 = mean(AC3.HEX.Hits)), by = .(WATERBODY, MONTH)]
@@ -135,7 +121,7 @@ load("stanOut.RData")
 #########################################################################################
 ## Examine model summary output
 summaryOut <- summary(stanOut)$summary
-summaryOut
+## summaryOut
 
 hist(summaryOut[ , "Rhat"])
 ## ID which parameters did not converge
@@ -236,13 +222,13 @@ levels(pThetaPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Io
 pThetaPlotFig <- ggplot(data = pThetaPlot, aes(x = WATERBODY, y = median,
                                                color = MONTH,
                                                alpha = pHits)) +
-    scale_alpha(expression("Proportion K"), breaks = c( 0, 0.075,0.15))+
-    scale_size(expression("Proportion J"), breaks = c(0, 0.15, 0.3)) +
+    scale_alpha(expression("Proportion K"), breaks = c( 0, 0.05, 0.10, 0.15))+
+    scale_radius(expression("Proportion J"), breaks = c(0, 0.1, 0.2, 0.3)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.5)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
                    position = position_dodge( width = 0.5)) + 
-    geom_point(aes(size = pPos), position = position_dodge(width = 0.5)) + 
+    geom_point(aes(size = pPos), position = position_dodge(width = 0.5), shape = 15) + 
     coord_flip() +
     ylab(expression("Estimated "*theta)) +
     xlab("Study site") +
@@ -302,14 +288,16 @@ pACPlot[ , marker := factor(marker, levels = c("ACTM3", "ACTM1"))]
 
 levels(pACPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
 
+pACPlot[ MONTH == "November", .(WATERBODY, MONTH, marker, median)]
 
-pACPlotFig <- ggplot(data = pACPlot, aes(x = WATERBODY, y = median,
+pACPlotFig <-
+    ggplot(data = pACPlot, aes(x = WATERBODY, y = median,
                                          color = MONTH,
                                          shape = marker,
                                          alpha = pHits)) +
-    scale_shape("Marker", breaks = c("ACTM1", "ACTM3")) +
-    scale_alpha(expression("Proportion K"), breaks = c( 0, 0.075,0.15))+
-    scale_size(expression("Proportion J"), breaks = c(0, 0.15, 0.3)) +
+    scale_shape_manual("Marker", breaks = c("ACTM1", "ACTM3"), values = c(15, 17)) +
+    scale_alpha(expression("Proportion K"), breaks = c( 0, 0.05, 0.10, 0.15))+
+    scale_radius(expression("Proportion J"), breaks = c(0, 0.1, 0.2, 0.3)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 1)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
@@ -381,15 +369,16 @@ levels(pPositivePlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", 
 pPositivePlotFig <- ggplot(data = pPositivePlot, aes(x = WATERBODY, y = median,
                                                  color = MONTH,
                                                  alpha = pHits)) +
-    scale_alpha(expression("Proportion K"))+
-    scale_size(expression("Proportion J")) +
+    scale_alpha(expression("Proportion K"), breaks = c( 0, 0.05, 0.10, 0.15))+
+    scale_radius(expression("Proportion J"), breaks = c(0, 0.1, 0.2, 0.3)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.5)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
                    position = position_dodge( width = 0.5)) + 
     geom_point(aes(
         size =  pPos), 
-               position = position_dodge(width = 0.5)) + 
+        position = position_dodge(width = 0.5),
+        shape = 15) + 
     coord_flip() +
     ylim(c(0, 1))+
     ylab(expression("Probability of positive detection in \u2265 1 sample")) +
@@ -491,7 +480,7 @@ coefGG <- ggplot( coefPlot, aes(x = ID, y = median)) +
                    position = position_dodge( width = 0.5)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
                    position = position_dodge( width = 0.5)) + 
-    geom_point() +
+    geom_point(size  = 4.0) +
     facet_grid(  level ~ . ) + 
     coord_flip() +
     ylab("Estimated distribution on raw logit scale") +
@@ -541,7 +530,8 @@ detectOne <- ggplot(pPosPlot[ nPositive > 0, ], aes(x = nSamples, y = median, co
     geom_ribbon(aes(ymin = l80, ymax = u80), alpha = 0.25, color = NA) +
     geom_line() +
     xlab("Number of samples per site collected") +
-    ylab( "Probability of detecting \u22651 positive sample per site")
+    ylab( "Probability of observing \u22651 positive sample per site") +
+    theme(legend.position="none")
 print(detectOne)
 
 ggsave("detectOne.jpg", detectOne, width = 6, height = 6)
