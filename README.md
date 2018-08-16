@@ -18,7 +18,8 @@ This repository contains the following files and folder:
 - `coefModel`: A folder with script
   - `formatDataAndFitStan.R`: The R Script that formats data and runs the Stan model
   - `positiveSampleCoef.stan`: The Stan model that is called by the R script.
-  
+  - `simSampleSize.R`: R script that takes the output from the model and calculates the number of samples required for one positive detection.
+
 ## Contact for code 
 
 Primary code developer:  Richard A. Erickson (rerickson@usgs.gov)
