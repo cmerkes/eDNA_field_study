@@ -219,6 +219,8 @@ pThetaPlot <- sampleEventKey[ pThetaPlot]
 
 levels(pThetaPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
 
+fwrite(x = pThetaPlot, file = "pThetaPlot.csv")
+
 pThetaPlotFig <- ggplot(data = pThetaPlot, aes(x = WATERBODY, y = median,
                                                color = MONTH,
                                                alpha = pHits)) +
@@ -289,6 +291,9 @@ pACPlot[ , marker := factor(marker, levels = c("ACTM3", "ACTM1"))]
 levels(pACPlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
 
 pACPlot[ MONTH == "November", .(WATERBODY, MONTH, marker, median)]
+
+pACPlot
+fwrite(x = pACPlot, file = "pACPlot.csv")
 
 pACPlotFig <-
     ggplot(data = pACPlot, aes(x = WATERBODY, y = median,
@@ -366,6 +371,7 @@ head(pPositivePlot)
 tail(pPositivePlot)
 levels(pPositivePlot$WATERBODY) <- c("Dam 18 spillway", "Boston Bay backwater", "Iowa River tributary", "Dam 17 spillway")
 
+fwrite(x = pPositivePlot, file = "pPositivePlot.csv")
 pPositivePlotFig <- ggplot(data = pPositivePlot, aes(x = WATERBODY, y = median,
                                                  color = MONTH,
                                                  alpha = pHits)) +
