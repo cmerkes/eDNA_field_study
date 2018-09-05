@@ -20,6 +20,11 @@ This repository contains the following files and folder:
   - `positiveSampleCoef.stan`: The Stan model that is called by the R script.
   - `simSampleSize.R`: R script that takes the output from the model and calculates the number of samples required for one positive detection.
 
+## Data 
+
+The data used in this project belong to the USFWS and the point of contact is Erica Mize: erica_mize@fws.gov
+
+
 ## Contact for code 
 
 Primary code developer:  Richard A. Erickson (rerickson@usgs.gov)
