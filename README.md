@@ -15,8 +15,8 @@ However, this code could be adapted by people who understand Stan and want to cr
 This repository contains the following files and folder:
 - `README.md`: This file
 - `LICENSE`: The standard USGS software license
+- `model_with_coef.R`: The R Script that formats data and runs the Stan model
 - `coefModel`: A folder with script
-  - `formatDataAndFitStan.R`: The R Script that formats data and runs the Stan model
   - `positiveSampleCoef.stan`: The Stan model that is called by the R script.
   - `simSampleSize.R`: R script that takes the output from the model and calculates the number of samples required for one positive detection.
 
