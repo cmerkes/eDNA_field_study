@@ -42,9 +42,13 @@ dataUse[ , A3 := ifelse(AC3.HEX.Hits > 0, 1, 0)]
 
 dataUse[ , A := ifelse(A1 > 0 | A3 > 0, 1, 0)]
 
+dataUse[ , .(mean(TEMP_F),
+             mean(DEPTH))]
+        
 ## Center temp and depth
 dataUse[ , TEMP_2 := scale(TEMP_F)]
 dataUse[ , DEPTH_2 := scale(DEPTH)]
+
 
 ## Look at summary of data and merge in sample level Z
 dataSummary <- dataUse[ , .(Prelim = sum(A), .N,
@@ -90,7 +94,7 @@ dataSummarySite <- dataUse[ , .(.N,
                                 DEPTH_2 = mean(DEPTH_2)
                                 ),
                            by = .(sampleEvent, sampleEventID,
-                                  WATERBODY, WATERBODYid)]
+                                  WATERBODY, WATERBODYid, MONTH)]
 
 dataSummarySite
 print(dataSummary, digits = 2)
@@ -152,7 +156,7 @@ build_model <-
 
 fit <- sampling(build_model,
                 chains = 4,
-                iter = 10000, data = dataUseStanData)
+                iter = 1000, data = dataUseStanData)
 
 fitSummary <- summary(fit, probs = c(0.025, 0.1, 0.50, 0.9, 0.975))$summary
 
@@ -187,7 +191,6 @@ traceplot(fit, pars = c("alpha_theta"), inc_warmup = TRUE)
 
 traceplot(fit, pars = "delta_p_AC1", inc_warmup = TRUE)
 traceplot(fit, pars = "delta_p_AC3", inc_warmup = TRUE)
-
 
 
 ## Lookat raw data
@@ -232,7 +235,8 @@ siteKey <-
     dataUse %>%
     group_by(WATERBODY) %>%
     summarize(site_id = mean(WATERBODYid))
-              
+
+
 pPsiPlot <-
     pPsiPlot %>%
     full_join(siteKey) %>%
@@ -241,8 +245,13 @@ pPsiPlot <-
                factor(WATERBODY,
                       levels = rev(c("Dam 18 Spillway", "Boston Bay",
                                  "Iowa River", "Dam 17 Spillway")),
-                      labels = rev(c("Dam 18 spillway", "Boston Baybackwater",
+                      labels = rev(c("Dam 18 spillway", "Boston Bay backwater",
                                  "Iowa River tributary", "Dam 17 spillway"))))
+
+
+
+pPsiPlot %>%
+    select(waterbody, l95, median, u95) 
 
 pPsiPlotFig <- ggplot(data = pPsiPlot, aes(x = waterbody, y = median)) +
     geom_linerange(aes(ymin = l95, ymax = u95)) + 
@@ -257,6 +266,9 @@ pPsiPlotFig <- ggplot(data = pPsiPlot, aes(x = waterbody, y = median)) +
 pPsiPlotFig 
 iomFolder = "./Feb_2015_figures/"
 ggsave(paste0(iomFolder, "pPsiPlot.pdf"), pPsiPlotFig, width = 6, height = 4)
+
+
+write.csv(file = paste0(iomFolder, "psi_prob.csv"), pPsiPlot, row.names = FALSE)
 
 ## Extract out thetas to plot
 pThetaPlot <-
@@ -284,10 +296,21 @@ pThetaPlot <-
                factor(WATERBODY,
                       levels = c("Dam 18 Spillway", "Boston Bay",
                                  "Iowa River", "Dam 17 Spillway"),
-                      labels = c("Dam 18 spillway", "Boston Baybackwater",
+                      labels = c("Dam 18 spillway", "Boston Bay backwater",
                                  "Iowa River tributary", "Dam 17 spillway"))) %>%
     mutate(pPos = nPositive/nSamples)
                
+
+pThetaPlot %>%
+    select(waterbody, Month, l95, median, u95)
+
+
+pThetaPlot %>%
+    select(waterbody, Month, l95, median, u95) %>%
+    arrange(Month)
+
+write.csv(file = paste0(iomFolder, "theta_prob.csv"), pThetaPlot, row.names = FALSE)
+
 pThetaPlotFig <-
     ggplot(data = pThetaPlot, aes(x = waterbody, y = median,
                                                color = Month)) +
@@ -308,6 +331,7 @@ pThetaPlotFig <-
     theme(strip.background = element_blank(), strip.text = element_blank())
 
 pThetaPlotFig
+
 ggsave(paste0(iomFolder, "pThetaPlot.pdf"), pThetaPlotFig, width = 6, height = 6)
 ggsave(paste0(iomFolder, "pThetaPlot.jpg"), pThetaPlotFig, width = 6, height = 6)
 
@@ -342,23 +366,35 @@ pAC3Plot <-
            marker = "ACTM3") %>%
     mutate(pPos = nPositive/nSamples)
 
-pACPlot <- rbind(pAC3Plot, pAC1Plot) %>%
+pACPlot <-
+    rbind(pAC3Plot, pAC1Plot) %>%
     mutate(waterbody =
                factor(WATERBODY,
                       levels = c("Dam 18 Spillway", "Boston Bay",
                                  "Iowa River", "Dam 17 Spillway"),
-                      labels = c("Dam 18 spillway", "Boston Baybackwater",
-                                 "Iowa River tributary", "Dam 17 spillway")))
+                      labels = c("Dam 18 spillway", "Boston Bay backwater",
+                                 "Iowa River tributary", "Dam 17 spillway")),
+           marker = factor(marker,
+                           levels = c("ACTM3", "ACTM1") ))
+
+pACPlot %>%
+    select(marker, waterbody, Month, l95, median, u95)
 
 
+pACPlot %>%
+    select(marker, waterbody, Month, l95, median, u95) %>%
+    arrange(waterbody, Month)
+
+write.csv(file = paste0(iomFolder, "p_ACTM_prob.csv"), pACPlot, row.names = FALSE)
 
 pACPlotFig <- ggplot(data = pACPlot, aes(x = waterbody, y = median,
                                          color = Month,
                                          shape = marker)) +
-    scale_size(expression("Proportion J"), trans = "sqrt") +     
+    scale_size(expression("Proportion J"), trans = "sqrt") +
+    scale_shape("Marker", guide = guide_legend(reverse=TRUE)) + 
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.9)) + 
-    geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
+    geom_linerange(aes(ymin = l80, ymax = u80), size = 0.9,
                    position = position_dodge( width = 0.9)) + 
     geom_point(aes(size = pPos), position = position_dodge(width = 0.9)) + 
     coord_flip() +
@@ -375,12 +411,13 @@ pACPlotFig
 ggsave(paste0(iomFolder, "pACPlot.pdf"), pACPlotFig, width = 6, height = 6)
 ggsave(paste0(iomFolder, "pACPlot.jpg"), pACPlotFig, width = 6, height = 6)
 
+
 ## plot regression coef
 regCoefPlot <-
     fit_summary %>%
-    filter(grepl("(alpha_theta|delta_p_(AC1|AC3))\\[(13|14)\\]", parameter)) %>% 
-    mutate(lvl = gsub("(alpha_theta|delta_p_(AC1|AC3))\\[(13|14)\\]", "\\1", parameter),
-           par = ifelse(grepl("13", parameter), "Temperature", "Depth")) %>%
+    filter(grepl("(alpha_theta|delta_p_(AC1|AC3))\\[(13|14|15|16)\\]", parameter)) %>%
+    mutate(lvl = gsub("(alpha_theta|delta_p_(AC1|AC3))\\[(13|14|15|16)\\]", "\\1", parameter),
+           par = ifelse(grepl("13", parameter), "Temperature",  "Depth")) %>%
     mutate(lvl_plt = factor(lvl,
                             levels = c("delta_p_AC1", "delta_p_AC3", "alpha_theta"),
                             labels = c("ACTM1", "ACTM3","Collection sample")))
@@ -423,11 +460,22 @@ pPrelimPlot <-
                factor(WATERBODY,
                       levels = c("Dam 18 Spillway", "Boston Bay",
                                  "Iowa River", "Dam 17 Spillway"),
-                      labels = c("Dam 18 spillway", "Boston Baybackwater",
+                      labels = c("Dam 18 spillway", "Boston Bay backwater",
                                  "Iowa River tributary", "Dam 17 spillway")))
 
            
-pPrelimPlot
+pPrelimPlot %>%
+    select(waterbody, Month, l95, median, u95)
+
+pPrelimPlot %>%
+    select(waterbody, Month, l95, median, u95) %>%
+    filter(waterbody != "Boston Bay backwater") %>%
+    pull(median) %>%
+    range() %>%
+    round(2)
+
+
+write.csv(file = paste0(iomFolder, "pPrelimPlot.csv"), pPrelimPlot, row.names = FALSE)
 
 pPrelimPlotFig <-
     ggplot(data = pPrelimPlot, aes(x = waterbody,
@@ -479,7 +527,7 @@ prob_detect_one_Plot <-
                factor(WATERBODY,
                       levels = c("Dam 18 Spillway", "Boston Bay",
                                  "Iowa River", "Dam 17 Spillway"),
-                      labels = c("Dam 18 spillway", "Boston Baybackwater",
+                      labels = c("Dam 18 spillway", "Boston Bay backwater",
                                  "Iowa River tributary", "Dam 17 spillway")))
            
 
