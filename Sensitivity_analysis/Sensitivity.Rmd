@@ -1,0 +1,413 @@
+---
+title: "Senstivity Analysis"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pre-work
+
+This analysis uses the listed packages and uses all cores on the machine. 
+
+```{r load_packages, echo = TRUE, message=FALSE}
+library(tidyverse)
+library(data.table)
+library(rstan)
+options(mc.cores = parallel::detectCores())
+rstan_options("auto_write" = TRUE)
+```
+
+Prior to building the model, the data is loaded and manipulated. This code is not showed, but is in the markdown file.
+```{r data, eval = TRUE, echo = FALSE}
+## Load in data summary and merge
+d1 <- fread("../30000_Data_Summary1_shared.csv")
+d2 <- fread("../30001_Data_Summary1_shared.csv")
+d3 <- fread("../30005_Data_Summary1_shared.csv")
+dAll <- rbind(d1, d2, d3)
+
+## Load in metadata and merge
+m1 <- fread("../Iowa_30000.csv")
+m2 <- fread("../Iowa_30001.csv")
+m3 <- fread("../Iowa_30005.csv")
+mAll <- rbind(m1, m2, m3)
+
+## Merge data summary and metadata
+setkey(mAll, "RUID")
+setkey(dAll, "UniqueID")
+
+dataUse <- mAll[ dAll]
+dataUse <- dataUse[ BLANK == "No", ] 
+
+## Create ID Columns 
+dataUse[ , WATERBODY := factor(WATERBODY)]
+dataUse[ , WATERBODYid := as.numeric(WATERBODY)]
+dataUse[ , MONTH := factor(gsub("(\\d{1,2})/(\\d{1,2})/(\\d{1,2})", "\\1",
+                                DATE_COLL))]
+dataUse[ , MONTHid := as.numeric(MONTH)]
+
+dataUse[ , sampleEvent := factor(paste(WATERBODY, MONTH, sep = "-"))]
+dataUse[ , sampleEventID := as.numeric(sampleEvent)]
+
+## Create sample level detection columns
+dataUse[ , A1 := ifelse(AC1.FAM.Hits > 0, 1, 0)]
+dataUse[ , A3 := ifelse(AC3.HEX.Hits > 0, 1, 0)]
+dataUse[ , A  := ifelse(A1 > 0 | A3 > 0, 1, 0)]
+
+## Center temp and depth
+dataUse[ , TEMP_2 := scale(TEMP_F)]
+dataUse[ , DEPTH_2 := scale(DEPTH)]
+
+
+## Look at summary of data and merge in sample level Z
+dataSummary <- dataUse[ , .(Prelim = sum(A), .N,
+                            Abar = mean(A)),
+                       by = .(  WATERBODY, WATERBODYid,
+                              MONTH, MONTHid,
+                              sampleEventID)][ order(sampleEventID),]
+dataSummary[ , Z := ifelse(Prelim > 0, 1, 0)]
+
+setkey(dataSummary, "sampleEventID")
+setkey(dataUse, "sampleEventID")
+
+dataUse <- dataUse[dataSummary[ , .(sampleEventID, Z)]]
+
+sampleEventKey <- copy(dataUse[ , .(ID = mean(sampleEventID),
+                               hits = sum(AC1.FAM.Hits + AC3.HEX.Hits),
+                               nPositive = sum(A)),
+                               by = .(sampleEvent, MONTH, WATERBODY)])
+sampleEventKey[ , MONTH := factor(MONTH, levels = c("4", "5", "11"))]
+
+## Create site visit index
+dataUse[ , index := 1:nrow(dataUse)]
+
+start_stop <- dataUse[ , .(start_indx = min(index),
+                           end_indx = max(index)),
+                      sampleEventID ]
+
+start_index <- as.array(start_stop[ , start_indx])
+end_index <- as.array(start_stop[ , end_indx])
+
+n_samples <- as.array(dataUse[ , .N, by = sampleEventID][ , N])
+
+## calculate number of samples per site
+dataSummarySite <- dataUse[ , .(.N,
+                                zObs = ifelse(sum(Z) > 0, 1, 0),
+                                TEMP_F = mean(TEMP_F),
+                                DEPTH = mean(DEPTH),
+                                TEMP_F_2 = mean(TEMP_2), 
+                                DEPTH_2 = mean(DEPTH_2)
+                                ),
+                           by = .(sampleEvent, sampleEventID,
+                                  WATERBODY, WATERBODYid, MONTH)]
+site_detection <- dataSummary[ , Z]
+
+## Create predictor matricies
+Xpsi <- model.matrix( ~ WATERBODY - 1, dataSummarySite)
+
+## V is p-level coef, W is theta-level coef
+Vp <- Wtheta <- model.matrix( ~  sampleEvent - 1 + TEMP_2 + DEPTH_2, dataUse)
+
+## create summary matrix for theta
+site_event_predict <- model.matrix( ~ sampleEvent - 1 + TEMP_F_2 + DEPTH_2, dataSummarySite)
+
+## Get number of sites, samples per site
+n_sites <- dataUse[ , length(unique(sampleEvent))]
+n_obs <- nrow(dataUse)
+```
+
+
+## Specify inputs
+
+We need to specify the Stan inputs as a list in R. We will add the priors to the list later. 
+
+
+```{r baseline}
+## Save data in list for Stan
+base_line_input <- list(
+    n_sites = n_sites,
+    n_obs = n_obs,
+    n_psi_coef = ncol(Xpsi),
+    X_psi = Xpsi,
+    site_detection = site_detection,
+    n_samples = n_samples,
+    n_theta_coef = ncol(Wtheta),
+    W_theta = Wtheta,
+    n_p_coef = ncol(Vp),
+    V_p = Vp,
+    AC1 = dataUse[ , A1],
+    AC3 = dataUse[ , A3],
+    any_detected = dataUse[ , A],
+    k = rep(8, nrow(dataUse)),
+    start_index  = start_index,
+    end_index = end_index,
+    n_row_sep = nrow(site_event_predict),
+    n_col_sep = ncol(site_event_predict),
+    site_event_predic = site_event_predict,
+    n_predict_samples = 200
+)
+```
+
+The first step is to run build the model. This takes about a minute to compile. We will be able to re-use this model and not compile during this session.
+
+```{r, build_model}
+build_model <- 
+    stan_model("../coefModel/coefModel.stan")
+```
+
+Now that the we've build the model, we can run the scenarios. 400 iterations (200 warm-up and 200 sampling) are enough for the medians of the posterior distributions. For the main results in the paper, 2,000 appeared to be good for the credible interval limits, but 10,000 were run to ensure numerical convergence. 
+
+First, we create a table of input variables. 
+
+```{r input, echo = TRUE}
+input_table <- as_tibble(expand.grid(prior_mean = c(-1, 0, 1), prior_sd = c(1, 2, 3)))
+```
+
+This includes ```r input_table %>% pull(prior_mean) %>% unique(.) %>% length(.)``` different priors for the mean of $\alpha$, $\beta$, and $\delta$s on the logit scale (```r input_table %>% pull(prior_mean) %>% unique(.)```) and  ```r input_table %>% pull(prior_sd) %>% unique(.) %>% length(.)``` different priors for the sd of $\alpha$, $\beta$, and $\delta$s on the logit scale (```r input_table %>% pull(prior_sd) %>% unique(.)```). We assumed the all slope and coeffients had the same prior values in each vector and the ACTM1 and ACTM 3 priors were the same. 
+
+The next step is to loop over this input table, extract the values, fit the model, and save the end points of interest. The `runMCMC` allows the code to be run once and saved. This avoids re-running the Stan model. When `runMCMC = TRUE`, the model is re-run. When `runMCMC = FALSE`, the saved data is loaded. 
+
+```{r, run_baseline, echo = TRUE, message=FALSE, eval = TRUE}
+runMCMC = FALSE
+if(runMCMC){
+  ## Create output table
+  psi_output_table <- tibble(
+    mean = numeric(),
+    se_mean = numeric(),
+    l95 = numeric(),
+    l80 = numeric(),
+    median = numeric(),
+    u80 = numeric(),
+    u95 = numeric(),
+    n_eff = numeric(),
+    Rhat = numeric(),
+    site_id = numeric(),
+    WATERBODY = character(),
+    waterbody = character(),
+    prior_mean = numeric(),
+    prior_sd = numeric()
+  )
+
+  theta_output_table <- tibble(
+    mean = numeric(),
+    se_mean = numeric(),
+    l95 = numeric(),
+    l80 = numeric(),
+    median = numeric(),
+    u80 = numeric(),
+    u95 = numeric(),
+    n_eff = numeric(),
+    Rhat = numeric(),
+    waterbody = character(),
+    month = character(),
+    prior_mean = numeric(),
+    prior_sd = numeric()
+  )
+
+  p_output_table <- tibble(
+    mean = numeric(),
+    se_mean = numeric(),
+    l95 = numeric(),
+    l80 = numeric(),
+    median = numeric(),
+    u80 = numeric(),
+    u95 = numeric(),
+    n_eff = numeric(),
+    Rhat = numeric(),
+    waterbody = character(),
+    month = character(),
+    markder = character(),
+    pPos = numeric(),
+    prior_mean = numeric(),
+    prior_sd = numeric()
+  )
+
+  ## Create key tables for sites and sample events 
+  siteKey <-
+      dataUse %>%
+      group_by(WATERBODY) %>%
+      summarize(site_id = mean(WATERBODYid))
+
+  siteEventKey <-
+      dataUse %>%
+      group_by(WATERBODY, MONTH, sampleEventID) %>%
+      summarize(nPositive = sum(A),
+                Z = mean(Z),
+                nSamples = n())
+
+  ## loop over table
+  for(index in 1:nrow(input_table)){
+    ## Specify priors 
+    prior_mean <- input_table %>% slice(index) %>% pull(prior_mean)
+    prior_sd   <- input_table %>% slice(index) %>% pull(prior_sd)
+    base_line_input$delta_mean <- prior_mean
+    base_line_input$delta_sd   <- prior_sd
+    base_line_input$alpha_mean <- prior_mean
+    base_line_input$alpha_sd   <- prior_sd 
+    base_line_input$beta_mean  <- prior_mean
+    base_line_input$beta_sd    <- prior_sd 
+
+    ## run model
+    fit <- sampling(build_model,
+                    chains = 4,
+                    iter = 400, data = base_line_input)
+
+    ## Extract fit
+    fit_summary <- summary(fit, probs = c(0.025, 0.1, 0.50, 0.9, 0.975))$summary  %>%
+      as.data.frame() %>% 
+      rownames_to_column('parameter') %>%
+      as_tibble() %>%
+      rename( 'l95' = `2.5%`, "l80" = `10%`,
+             "median" = `50%`,
+             "u80" = `90%`,  "u95" = `97.5%`)
+    ## Extract psi
+    pPsiPlot <-
+      fit_summary %>%
+      filter(grepl("psi_site", parameter)) %>%
+      select(-sd) %>%
+      mutate(site_id = as.numeric(gsub("psi_site\\[(\\d+)\\]", "\\1", parameter))) %>%
+      full_join(siteKey) %>%
+      select(-parameter) %>%
+      mutate(waterbody =
+             factor(WATERBODY,
+                    levels = rev(c("Dam 18 Spillway", "Boston Bay",
+                                 "Iowa River", "Dam 17 Spillway")),
+                    labels = rev(c("Dam 18 spillway", "Boston Bay backwater",
+                                 "Iowa River tributary", "Dam 17 spillway")))) %>%
+      mutate(prior_mean = prior_mean, prior_sd = prior_sd)
+  
+    psi_output_table <- 
+      rbind(psi_output_table, pPsiPlot)
+  
+    ## Extract out theta
+    pThetaPlot <-
+      fit_summary %>%
+      filter(grepl("theta_site", parameter)) %>%
+      select(-sd) %>%
+      mutate(sampleEventID = as.numeric(gsub("theta_site\\[(\\d+)\\]", "\\1", parameter))) %>%
+      full_join(siteEventKey) %>%
+      select(-parameter) %>%
+      filter(Z > 0) %>%
+      mutate(Month= factor(MONTH,
+                           levels = rev(c( 4, 5, 11)),
+                           labels = rev(c( "April", "May", "November"))),
+             waterbody =
+                 factor(WATERBODY,
+                        levels = c("Dam 18 Spillway", "Boston Bay",
+                                   "Iowa River", "Dam 17 Spillway"),
+                        labels = c("Dam 18 spillway", "Boston Bay backwater",
+                                   "Iowa River tributary", "Dam 17 spillway"))) %>%
+      mutate(pPos = nPositive/nSamples)  %>%
+      select(mean, se_mean, l95, l80, median, u80, u95, n_eff, Rhat, waterbody, Month) %>%
+      mutate(prior_mean = prior_mean, prior_sd = prior_sd)
+  
+    theta_output_table <- 
+      rbind(theta_output_table, pThetaPlot)
+  
+    ## Extract out ps
+    pAC1Plot <-
+      fit_summary %>%
+      filter(grepl("p_AC1_site", parameter)) %>%
+      select(-sd) %>%
+      mutate(sampleEventID = as.numeric(gsub("p_AC1_site\\[(\\d+)\\]", "\\1", parameter)))  %>%
+      full_join(siteEventKey) %>%
+      select(-parameter) %>%
+      filter(Z > 0) %>%
+      mutate(Month= factor(MONTH,
+                           levels = rev(c( 4, 5, 11)),
+                           labels = rev(c( "April", "May", "November"))),
+             marker = "ACTM1") %>%
+      mutate(pPos = nPositive/nSamples)
+
+    pAC3Plot <-
+      fit_summary %>%
+      filter(grepl("p_AC3_site", parameter)) %>%
+      select(-sd) %>%
+      mutate(sampleEventID = as.numeric(gsub("p_AC3_site\\[(\\d+)\\]", "\\1", parameter)))  %>%
+      full_join(siteEventKey) %>%
+      select(-parameter) %>%
+      filter(Z > 0) %>%
+      mutate(Month= factor(MONTH,
+                           levels = rev(c( 4, 5, 11)),
+                           labels = rev(c( "April", "May", "November"))),
+             marker = "ACTM3") %>%
+      mutate(pPos = nPositive/nSamples)
+
+    pACPlot <-
+      rbind(pAC3Plot, pAC1Plot) %>%
+      mutate(waterbody =
+                 factor(WATERBODY,
+                        levels = c("Dam 18 Spillway", "Boston Bay",
+                                   "Iowa River", "Dam 17 Spillway"),
+                        labels = c("Dam 18 spillway", "Boston Bay backwater",
+                                   "Iowa River tributary", "Dam 17 spillway")),
+            marker = factor(marker,
+                             levels = c("ACTM3", "ACTM1") ))  %>%
+      select(mean, se_mean, l95, l80, median, u80, u95, n_eff, Rhat, waterbody, Month, marker, pPos) %>%
+      mutate(prior_mean = prior_mean, prior_sd = prior_sd)
+  
+    p_output_table <-
+      rbind(p_output_table, pACPlot)
+  }
+  save(p_output_table, psi_output_table, theta_output_table, file = "MCMC_outputs.Rdata")
+} else {
+  load("MCMC_outputs.Rdata")
+}
+```
+
+```{r, save_or_load_outputs}
+
+```
+
+
+After running the scenarios, we plot the results. First, we examined the $\psi$ parameters.
+
+```{r psi_plot, results='hide', fig.height=3}
+ggplot(psi_output_table, aes(x = waterbody, y = median)) + 
+  geom_point() +
+  geom_linerange(aes(ymin = l95, ymax = u95)) + 
+  geom_linerange(aes(ymin = l80, ymax = u80)) + 
+  coord_flip() +
+  facet_grid( prior_sd ~ prior_mean, 
+              labeller = label_bquote(col = "prior mean " * .(prior_mean),
+                                      row = "prior sd " * .(prior_sd))) +
+  ylim(c(0,1)) +
+  theme_bw()
+```
+
+Next, we examined the $\theta$ parameters.
+
+
+```{r theta_plot, results='hide', fig.height=8}
+ggplot(theta_output_table, aes(x = waterbody, y = median, color = factor(prior_sd))) + 
+  geom_point(position = position_dodge(width = 0.5)) +
+  geom_linerange(aes(ymin = l95, ymax = u95), position = position_dodge(width = 0.5)) + 
+  geom_linerange(aes(ymin = l80, ymax = u80), position = position_dodge(width = 0.5)) + 
+  coord_flip() +
+  facet_grid( prior_mean ~ Month, 
+              labeller = label_bquote(row = "prior mean " * .(prior_mean))) + 
+                                      #row = "prior sd " * .(prior_sd))) +
+  ylim(c(0,1)) +
+  theme_bw() +
+    scale_color_manual("prior sd", values = c("blue", "red", "black"))
+```
+Last, we examine the $p$ parameter estimates.
+
+```{r p_plot, results='hide', fig.height=5}
+ggplot(p_output_table, aes(x = factor(prior_mean), y = median, color = factor(prior_sd))) + 
+  geom_point(position = position_dodge(width = 0.5)) +
+  xlab("prior mean") + 
+  geom_linerange(aes(ymin = l95, ymax = u95), position = position_dodge(width = 0.5)) + 
+  geom_linerange(aes(ymin = l80, ymax = u80), position = position_dodge(width = 0.5)) + 
+  coord_flip() +
+  facet_grid( waterbody ~ Month + marker) + 
+#              labeller = label_bquote(row = "prior mean " * .(prior_mean))) + 
+                                      #row = "prior sd " * .(prior_sd))) +
+  # ylim(c(0,1)) +
+  theme_bw() +
+    scale_color_manual("prior sd", values = c("blue", "red", "black"))
+```

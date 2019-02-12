@@ -147,7 +147,13 @@ dataUseStanData <- list(
     n_row_sep = nrow(site_event_predict),
     n_col_sep = ncol(site_event_predict),
     site_event_predic = site_event_predict,
-    n_predict_samples = 200
+    n_predict_samples = 200,
+    delta_mean = 0,
+    delta_sd = 1,
+    alpha_mean = 0,
+    alpha_sd = 1,
+    beta_mean = 0,
+    beta_sd = 1
 )
 
 ## build model and sample from it 
@@ -156,7 +162,7 @@ build_model <-
 
 fit <- sampling(build_model,
                 chains = 4,
-                iter = 1000, data = dataUseStanData)
+                iter = 10000, data = dataUseStanData)
 
 fitSummary <- summary(fit, probs = c(0.025, 0.1, 0.50, 0.9, 0.975))$summary
 
@@ -192,6 +198,8 @@ traceplot(fit, pars = c("alpha_theta"), inc_warmup = TRUE)
 traceplot(fit, pars = "delta_p_AC1", inc_warmup = TRUE)
 traceplot(fit, pars = "delta_p_AC3", inc_warmup = TRUE)
 
+pairs(fit, pars = c("alpha_theta", "delta_p_AC3"), inc_warmup = TRUE)
+
 
 ## Lookat raw data
 
@@ -207,6 +215,11 @@ dataUse[Z > 0 , .(A = mean(A)), by = .(MONTH, WATERBODY)]
 
 ## For Y
 dataUse[Z > 0 & A > 0 ,
+        .(pAC1 = mean(AC1.FAM.Hits/8),
+          pAC3 = mean(AC3.HEX.Hits/8)),
+        by = .(MONTH, WATERBODY)]
+
+dataUse[Z > 0,
         .(pAC1 = mean(AC1.FAM.Hits/8),
           pAC3 = mean(AC3.HEX.Hits/8)),
         by = .(MONTH, WATERBODY)]
@@ -256,7 +269,7 @@ pPsiPlot %>%
 pPsiPlotFig <- ggplot(data = pPsiPlot, aes(x = waterbody, y = median)) +
     geom_linerange(aes(ymin = l95, ymax = u95)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4) + 
-    geom_point(size = 3) +
+    geom_point(size = 3, shape = 15) +
     coord_flip() +
     ylim(c(0, 1))+
     ylab(expression("Estimated "*psi)) +
@@ -284,6 +297,7 @@ siteEventKey <-
               Z = mean(Z),
               nSamples = n())
 
+
 pThetaPlot <-
     pThetaPlot %>%
     full_join(siteEventKey) %>%
@@ -299,7 +313,7 @@ pThetaPlot <-
                       labels = c("Dam 18 spillway", "Boston Bay backwater",
                                  "Iowa River tributary", "Dam 17 spillway"))) %>%
     mutate(pPos = nPositive/nSamples)
-               
+
 
 pThetaPlot %>%
     select(waterbody, Month, l95, median, u95)
@@ -391,7 +405,8 @@ pACPlotFig <- ggplot(data = pACPlot, aes(x = waterbody, y = median,
                                          color = Month,
                                          shape = marker)) +
     scale_size(expression("Proportion J"), trans = "sqrt") +
-    scale_shape("Marker", guide = guide_legend(reverse=TRUE)) + 
+    scale_shape_manual("Marker", guide = guide_legend(reverse=TRUE),
+                values = c(15, 18)) + 
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.9)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 0.9,
@@ -550,3 +565,5 @@ prob_detect_one_Fig <-
 prob_detect_one_Fig
 ggsave(paste0(iomFolder, "prob_detect_one_Plot.pdf"), prob_detect_one_Fig, width = 8, height = 6)
 ggsave(paste0(iomFolder, "prob_detect_one_Plot.jpg"), prob_detect_one_Fig, width = 8, height = 6)
+
+

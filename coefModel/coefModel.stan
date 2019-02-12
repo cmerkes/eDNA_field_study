@@ -38,7 +38,13 @@ data {
   int<lower = 1> n_predict_samples;
 
   // priors
-  
+  real delta_sd;
+  real alpha_sd;
+  real beta_sd;
+
+  real delta_mean;
+  real alpha_mean;
+  real beta_mean;
 }
 parameters {
   vector[n_p_coef]     delta_p_AC1;
@@ -62,10 +68,10 @@ model {
 
   real target_temp;
   
-  delta_p_AC1 ~ normal(0, 1);
-  delta_p_AC3 ~ normal(0, 1);
-  alpha_theta ~ normal(0, 1);
-  beta_psi ~ normal(0, 1);
+  delta_p_AC1 ~ normal(delta_mean, delta_sd);
+  delta_p_AC3 ~ normal(delta_mean, delta_sd);
+  alpha_theta ~ normal(alpha_mean, alpha_sd);
+  beta_psi    ~ normal(beta_mean, beta_sd);
 
   target_temp = 0;
  
