@@ -19,6 +19,8 @@ This repository contains the following files and folder:
 - `coefModel`: A folder with script
   - `positiveSampleCoef.stan`: The Stan model that is called by the R script.
   - `simSampleSize.R`: R script that takes the output from the model and calculates the number of samples required for one positive detection.
+- `Sensitivity_analysis`: A folder with the sensitivity analysis in a R Markdown file and outputs.
+
 
 ## Data 
 
