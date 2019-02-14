@@ -328,7 +328,9 @@ write.csv(file = paste0(iomFolder, "theta_prob.csv"), pThetaPlot, row.names = FA
 pThetaPlotFig <-
     ggplot(data = pThetaPlot, aes(x = waterbody, y = median,
                                                color = Month)) +
-    scale_size(expression("Proportion J"), trans = "sqrt") +
+    scale_size(expression(
+        atop("Proportion of samples", "("*italic(J)*") detected eDNA")), trans = "sqrt",
+               breaks = round(seq(0.05, 0.3, length.out= 6 ),2)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.5)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
@@ -404,7 +406,9 @@ write.csv(file = paste0(iomFolder, "p_ACTM_prob.csv"), pACPlot, row.names = FALS
 pACPlotFig <- ggplot(data = pACPlot, aes(x = waterbody, y = median,
                                          color = Month,
                                          shape = marker)) +
-    scale_size(expression("Proportion J"), trans = "sqrt") +
+    scale_size(expression(
+        atop("Proportion of samples", "("*italic(J)*") detected eDNA")), trans = "sqrt",
+        breaks = round(seq(0.05, 0.3, length.out= 6 ),2)) +
     scale_shape_manual("Marker", guide = guide_legend(reverse=TRUE),
                 values = c(15, 18)) + 
     geom_linerange(aes(ymin = l95, ymax = u95),
@@ -420,11 +424,15 @@ pACPlotFig <- ggplot(data = pACPlot, aes(x = waterbody, y = median,
     scale_color_manual("Month", values = c("blue", "red", "black"),
                        guide = guide_legend(reverse=TRUE)) +
     facet_grid(waterbody ~ ., scales = 'free_y') +
-    theme(strip.background = element_blank(), strip.text = element_blank())
+    theme(strip.background = element_blank(), strip.text = element_blank()) +
+    guides(size = guide_legend(override.aes = list(shape = 15)),
+           colour = guide_legend(override.aes = list(shape = 15)),
+           shape = guide_legend(override.aes = list(size = 4)))
+
 
 pACPlotFig
-ggsave(paste0(iomFolder, "pACPlot.pdf"), pACPlotFig, width = 6, height = 6)
-ggsave(paste0(iomFolder, "pACPlot.jpg"), pACPlotFig, width = 6, height = 6)
+ggsave(paste0(iomFolder, "pACPlot.pdf"), pACPlotFig, width = 6, height = 7)
+ggsave(paste0(iomFolder, "pACPlot.jpg"), pACPlotFig, width = 6, height = 7)
 
 
 ## plot regression coef
@@ -496,13 +504,16 @@ pPrelimPlotFig <-
     ggplot(data = pPrelimPlot, aes(x = waterbody,
                                    y = median,
                                    color = Month)) +
-    scale_size(expression("Proportion of samples\n(J) detected eDNA")) +
+    scale_size(expression(
+        atop("Proportion of samples", "("*italic(J)*") detected eDNA")), trans = "sqrt",
+        breaks = round(seq(0.05, 0.3, length.out= 6 ),2)) +
     geom_linerange(aes(ymin = l95, ymax = u95),
                    position = position_dodge( width = 0.5)) + 
     geom_linerange(aes(ymin = l80, ymax = u80), size = 1.4,
                    position = position_dodge( width = 0.5)) + 
     geom_point(aes(
-        size =  pPos), 
+        size =  pPos),
+        shape = 15,
         position = position_dodge(width = 0.5)) + 
     coord_flip() +
     ylab(expression("Probability of detecting eDNA if taking one sample")) +
@@ -558,12 +569,13 @@ prob_detect_one_Fig <-
     scale_color_manual("Sample month", values = rev(c("blue", "red", "black")))  +
     scale_fill_manual("Sample month", values = rev(c("blue", "red", "black"))) +
     theme(legend.position="none") +
-    xlab("Number of samples per site (J)") +
+    xlab(expression("Number of samples per site ("*italic(J)*")")) +
     ylab("Probability of positive detection in \u2265 1 sample")
 
 
 prob_detect_one_Fig
-ggsave(paste0(iomFolder, "prob_detect_one_Plot.pdf"), prob_detect_one_Fig, width = 8, height = 6)
-ggsave(paste0(iomFolder, "prob_detect_one_Plot.jpg"), prob_detect_one_Fig, width = 8, height = 6)
-
+ggsave(paste0(iomFolder, "prob_detect_one_Plot.pdf"),
+       prob_detect_one_Fig, width = 8, height = 6)
+ggsave(paste0(iomFolder, "prob_detect_one_Plot.jpg"),
+       prob_detect_one_Fig, width = 8, height = 6)
 
